@@ -1,0 +1,57 @@
+trigger:
+- master
+
+variables:
+  azureServiceConnection: 'New-Service-Connection'
+  resourceGroupName: 'aks-rg'
+  location: 'eastus'
+  aksClusterName: 'aks-cluster'
+  tfVersion: '1.5.7'
+  group: Terraform-SP
+
+stages:
+- stage: DeployInfra
+  jobs:
+  - job: TerraformAKS
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - script: |
+        echo "Installing Terraform..."
+        sudo apt-get update -y
+        sudo apt-get install -y gnupg software-properties-common curl
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt update && sudo apt install terraform -y
+        terraform -version
+      displayName: 'Install Terraform'
+
+    - script: |
+        cd terraform
+        terraform init
+        terraform apply -auto-approve
+      displayName: 'Terraform Apply with Remote Backend'
+      env:
+        ARM_CLIENT_ID: '2be00f93-d4fe-43e9-ab18-66258d3d99ed'
+        ARM_CLIENT_SECRET: '5208Q~6Y8tEVoMk3x3hLbfilao3gGUBaiVUM.cY4'
+        ARM_SUBSCRIPTION_ID: '5c19ce42-b0da-45e9-b6a5-f669fcffae70'
+        ARM_TENANT_ID: '44e6c49f-9ed1-4017-b26f-b45fe54db3c9'
+      
+
+- stage: DeployApp
+  dependsOn: DeployInfra
+  jobs:
+  - job: K8sDeploy   
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az aks get-credentials --resource-group $(resourceGroupName) --name $(aksClusterName) --admin
+          kubectl apply -f terraform/k8-deployment.yaml
+          kubectl get svc
+        displayName: 'Deploy App to AKS'
